@@ -25,7 +25,13 @@ const page = await context.newPage()
 
 const errors = []
 page.on('pageerror', e => errors.push(e.message))
-page.on('console', m => { if (m.type() === 'error' && !m.text().includes('favicon')) errors.push(m.text()) })
+page.on('console', m => {
+  // A deep link on GitHub Pages is *meant* to return 404 — that is what triggers
+  // the 404.html SPA redirect. Chrome logs it as a console error regardless, so
+  // it is not a defect; a genuinely missing asset shows up as a failed check.
+  const spaFallback = /status of 404/.test(m.text())
+  if (m.type() === 'error' && !m.text().includes('favicon') && !spaFallback) errors.push(m.text())
+})
 
 /** Capture a word through the real UI and return what the app stored. */
 async function capture(term, { context: sentence } = {}) {

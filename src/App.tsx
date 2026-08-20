@@ -13,6 +13,7 @@ import { Pruefung } from './screens/Pruefung'
 import { Coach } from './screens/Coach'
 import { About } from './screens/About'
 import { Capture } from './ui/Capture'
+import { SyncBadge } from './ui/SyncBadge'
 
 const TITLES: Record<string, string> = {
   woerter: 'Wörter', word: 'Wort', ueben: 'Üben', grammatik: 'Grammatik',
@@ -89,9 +90,4 @@ export default function App() {
       {capture.open && <Capture prefill={capture.prefill} onClose={closeCapture} />}
     </>
   )
-}
-
-/** Placeholder until Phase 4 wires real sync state. */
-function SyncBadge() {
-  return <span className="sync-dot off" title="Not signed in — working offline" aria-label="Sync status" />
 }

@@ -15,12 +15,22 @@
       (function () {
         var q = window.location.search
         if (q.charAt(1) !== '/') return
+
+        // Icons above are relative, and browsers resolve them lazily — after the
+        // rewrite below, `./favicon.svg` would resolve against the deep path and
+        // 404. Pin them to the app root while the URL still points at it.
+        var root = window.location.pathname
+        var icons = document.querySelectorAll('link[rel="icon"], link[rel="apple-touch-icon"]')
+        for (var i = 0; i < icons.length; i++) {
+          icons[i].setAttribute('href', root + icons[i].getAttribute('href').replace(/^\.\//, ''))
+        }
+
         var decoded = q.slice(2).split('&').map(function (part) {
           return part.replace(/~and~/g, '&')
         })
         window.history.replaceState(
           null, null,
-          window.location.pathname.replace(/\/$/, '') + '/' + decoded[0] +
+          root.replace(/\/$/, '') + '/' + decoded[0] +
           (decoded[1] ? '?' + decoded.slice(1).join('&') : '') + window.location.hash
         )
       })()

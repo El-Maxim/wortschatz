@@ -1,0 +1,191 @@
+import type { SyncTable } from '../types'
+import { db, getMeta, setMeta } from '../db/dexie'
+import { client, currentSession } from './supabase'
+
+/**
+ * Last-write-wins sync, per row, on `updated_at`.
+ *
+ * Push: everything in the Dexie `syncQueue` is upserted, then the queue entry
+ * is dropped. Pull: every row changed remotely since the last successful sync
+ * is written locally, but only when it is strictly newer than the local copy.
+ *
+ * Runs on focus, on regaining network, and every five minutes while open.
+ * Conflicts are near-impossible with one user on two devices; when they do
+ * happen the newer edit wins and the older one is lost — documented in
+ * DECISIONS.md as an accepted trade-off.
+ */
+
+export type SyncState = 'offline' | 'signed-out' | 'idle' | 'syncing' | 'error'
+
+interface Mapping {
+  table: SyncTable
+  remote: string
+  /** local field -> remote column, for fields that are not plain snake_case. */
+  columns: Record<string, string>
+}
+
+/** camelCase -> snake_case for everything not listed explicitly. */
+function snake(field: string): string {
+  return field.replace(/[A-Z]/g, c => '_' + c.toLowerCase())
+}
+
+const TABLES: Mapping[] = [
+  { table: 'words', remote: 'words', columns: {} },
+  { table: 'cards', remote: 'cards', columns: {} },
+  { table: 'reviewLog', remote: 'review_log', columns: {} },
+  { table: 'grammarTopics', remote: 'grammar_topics', columns: {} },
+  { table: 'exercises', remote: 'exercises', columns: {} },
+  { table: 'exerciseAttempts', remote: 'exercise_attempts', columns: {} },
+  { table: 'coachRequests', remote: 'coach_requests', columns: {} },
+  { table: 'suggestions', remote: 'suggestions', columns: {} },
+  { table: 'exams', remote: 'exams', columns: {} },
+]
+
+const BY_TABLE = new Map(TABLES.map(m => [m.table, m]))
+
+function toRemote(row: Record<string, unknown>, mapping: Mapping): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(row)) {
+    if (value === undefined) continue
+    out[mapping.columns[key] ?? snake(key)] = value
+  }
+  return out
+}
+
+function toLocal(row: Record<string, unknown>, mapping: Mapping): Record<string, unknown> {
+  const reverse = new Map(Object.entries(mapping.columns).map(([local, remote]) => [remote, local]))
+  const out: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(row)) {
+    if (key === 'user_id') continue // server-owned; never mirrored locally
+    const local = reverse.get(key) ?? key.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase())
+    out[local] = value
+  }
+  return out
+}
+
+/** Timestamps round-trip through Postgres as `+00:00`; compare as instants. */
+function newer(a: unknown, b: unknown): boolean {
+  const ta = Date.parse(String(a ?? ''))
+  const tb = Date.parse(String(b ?? ''))
+  if (Number.isNaN(ta)) return false
+  if (Number.isNaN(tb)) return true
+  return ta > tb
+}
+
+let running = false
+const listeners = new Set<(state: SyncState, detail?: string) => void>()
+
+export function onSyncState(fn: (state: SyncState, detail?: string) => void): () => void {
+  listeners.add(fn)
+  return () => listeners.delete(fn)
+}
+
+function emit(state: SyncState, detail?: string) {
+  for (const fn of listeners) fn(state, detail)
+}
+
+export async function syncNow(): Promise<SyncState> {
+  if (!client) { emit('signed-out'); return 'signed-out' }
+  if (!navigator.onLine) { emit('offline'); return 'offline' }
+  const session = await currentSession()
+  if (!session) { emit('signed-out'); return 'signed-out' }
+  if (running) return 'syncing'
+
+  running = true
+  emit('syncing')
+  try {
+    await push()
+    await pull()
+    await setMeta('lastSyncAt', new Date().toISOString())
+    emit('idle')
+    return 'idle'
+  } catch (error) {
+    emit('error', error instanceof Error ? error.message : String(error))
+    return 'error'
+  } finally {
+    running = false
+  }
+}
+
+async function push(): Promise<void> {
+  const queued = await db.syncQueue.toArray()
+  if (!queued.length) return
+
+  // Group by table so each table is one round trip, not one per row.
+  const grouped = new Map<SyncTable, string[]>()
+  for (const entry of queued) {
+    const list = grouped.get(entry.table)
+    if (list) list.push(entry.rowId)
+    else grouped.set(entry.table, [entry.rowId])
+  }
+
+  for (const [table, ids] of grouped) {
+    const mapping = BY_TABLE.get(table)
+    if (!mapping) continue
+    const store = (db as unknown as Record<SyncTable, { bulkGet(ids: string[]): Promise<unknown[]> }>)[table]
+    const rows = (await store.bulkGet(ids)).filter(Boolean) as Record<string, unknown>[]
+    if (!rows.length) continue
+
+    const { error } = await client!.from(mapping.remote).upsert(rows.map(r => toRemote(r, mapping)))
+    if (error) throw new Error(`push ${mapping.remote}: ${error.message}`)
+
+    // Only clear what we actually sent; anything queued meanwhile survives.
+    const sent = new Set(rows.map(r => String(r.id)))
+    await db.syncQueue.bulkDelete(
+      queued.filter(q => q.table === table && sent.has(q.rowId)).map(q => q.seq!),
+    )
+  }
+}
+
+async function pull(): Promise<void> {
+  const since = await getMeta<string>('lastSyncAt', '1970-01-01T00:00:00.000Z')
+
+  for (const mapping of TABLES) {
+    const { data, error } = await client!
+      .from(mapping.remote)
+      .select('*')
+      .gt('updated_at', since)
+      .order('updated_at', { ascending: true })
+      .limit(2000)
+    if (error) throw new Error(`pull ${mapping.remote}: ${error.message}`)
+    if (!data?.length) continue
+
+    const store = (db as unknown as Record<SyncTable, {
+      get(id: string): Promise<Record<string, unknown> | undefined>
+      put(row: Record<string, unknown>): Promise<unknown>
+    }>)[mapping.table]
+
+    for (const remoteRow of data as Record<string, unknown>[]) {
+      const local = toLocal(remoteRow, mapping)
+      const existing = await store.get(String(local.id))
+      // LWW: a remote row only wins if it is strictly newer than what we hold.
+      if (existing && !newer(local.updatedAt, existing.updatedAt)) continue
+      // A row pulled from the server must not be pushed straight back.
+      await store.put(local)
+    }
+  }
+}
+
+let timer: ReturnType<typeof setInterval> | null = null
+
+/** Wire the triggers the spec asks for: focus, network regain, every 5 minutes. */
+export function startSync(): () => void {
+  const kick = () => { void syncNow() }
+
+  addEventListener('focus', kick)
+  addEventListener('online', kick)
+  addEventListener('offline', () => emit('offline'))
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) kick() })
+  timer = setInterval(kick, 5 * 60 * 1000)
+  kick()
+
+  return () => {
+    removeEventListener('focus', kick)
+    removeEventListener('online', kick)
+    if (timer) clearInterval(timer)
+  }
+}
+
+export async function pendingCount(): Promise<number> {
+  return db.syncQueue.count()
+}
