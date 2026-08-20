@@ -22,6 +22,30 @@ const VIEWPORTS = [
 const browser = await chromium.launch({ channel: 'chrome' })
 const problems = []
 
+/** A few words so the screens show real content rather than empty states. */
+const SEED = [
+  ['Haus', 'In dem Haus wohnt eine große Familie.'],
+  ['Ausrede', 'Das ist doch nur eine Ausrede!'],
+  ['laufen', null],
+  ['aufstehen', 'Ich muss morgen früh aufstehen.'],
+  ['Mädchen', null],
+]
+
+async function seed(page, base) {
+  await page.goto(base, { waitUntil: 'networkidle' })
+  for (const [term, sentence] of SEED) {
+    await page.click('.fab')
+    await page.fill('.sheet input.input', term)
+    await page.waitForTimeout(600)
+    if (sentence) {
+      await page.click('text=Where did you see it?')
+      await page.fill('.sheet textarea', sentence)
+    }
+    await page.click('.sheet button:has-text("Speichern")')
+    await page.waitForTimeout(1100)
+  }
+}
+
 for (const vp of VIEWPORTS) {
   const context = await browser.newContext({
     viewport: { width: vp.width, height: vp.height },
@@ -30,6 +54,7 @@ for (const vp of VIEWPORTS) {
     isMobile: vp.isMobile,
   })
   const page = await context.newPage()
+  await seed(page, BASE)
   page.on('pageerror', e => problems.push(`[${vp.tag}] page error: ${e.message}`))
   page.on('console', m => { if (m.type() === 'error') problems.push(`[${vp.tag}] console: ${m.text()}`) })
 
