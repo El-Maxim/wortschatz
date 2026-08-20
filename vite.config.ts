@@ -38,6 +38,10 @@ export default defineConfig({
         },
       },
       workbox: {
+        // Take control on the very first load, so even the first dictionary
+        // lookup passes through the worker and lands in the offline cache.
+        clientsClaim: true,
+        skipWaiting: true,
         globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
         // Dictionary shards are NOT precached (too large); cached on first use instead.
         globIgnores: ['**/dict/**'],

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from './db/dexie'
+import { seedGrammar } from './db/seed'
 import { useRoute } from './lib/router'
 import { Shell } from './ui/Shell'
 import { Woerter } from './screens/Woerter'
@@ -24,6 +25,9 @@ export default function App() {
 
   const openCapture = useCallback((prefill = '') => setCapture({ open: true, prefill }), [])
   const closeCapture = useCallback(() => setCapture({ open: false, prefill: '' }), [])
+
+  // Curated grammar topics land in Dexie on first run (idempotent).
+  useEffect(() => { void seedGrammar() }, [])
 
   // `?add=WORD` (iOS Shortcut) and the Android share target both land here.
   useEffect(() => {

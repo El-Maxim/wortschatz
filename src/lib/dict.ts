@@ -55,21 +55,26 @@ async function loadShard(key: string): Promise<Map<string, DictEntry[]>> {
   return pending
 }
 
-/** All dictionary senses for a lemma, best first (nouns before rarer POS). */
+/**
+ * All dictionary senses for a lemma, best first.
+ *
+ * German capitalisation is meaningful, so an exact-case match ranks first:
+ * typing `schön` must give the adjective, not the surname `Schön`. Only when
+ * nothing matches the typed casing (the user typed `haus`) do entries carrying
+ * gender or verb data win, then frequency breaks the tie.
+ */
 export async function lookup(input: string): Promise<DictEntry[]> {
   const term = input.trim()
   if (!term) return []
   const shard = await loadShard(shardKey(term))
   const hits = shard.get(fold(term)) ?? []
-  return [...hits].sort((a, b) => (a.f ?? 1e9) - (b.f ?? 1e9))
+  const score = (e: DictEntry) => (e.l === term ? 2 : 0) + (e.g || e.v ? 1 : 0)
+  return [...hits].sort((a, b) => score(b) - score(a) || (a.f ?? 1e9) - (b.f ?? 1e9))
 }
 
-/** The single best entry for a lemma, or null. */
+/** The single best entry for a lemma (see `lookup` for the ranking), or null. */
 export async function lookupBest(input: string): Promise<DictEntry | null> {
-  const hits = await lookup(input)
-  if (!hits.length) return null
-  // Prefer an entry that actually carries gender/verb data over a bare gloss.
-  return hits.find(e => e.g || e.v) ?? hits[0]
+  return (await lookup(input))[0] ?? null
 }
 
 /** Prefix suggestions for the capture field, from the already-loaded shard. */
