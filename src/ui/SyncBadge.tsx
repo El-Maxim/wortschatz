@@ -51,7 +51,11 @@ export function SyncBadge() {
         aria-label={`Sync status: ${dot.label}`}
       >
         <span className={`sync-dot ${dot.cls}`} />
-        {pending > 0 && <span className="small dim">{pending}</span>}
+        {/* The queue depth only means something once there is somewhere to sync
+            to — signed out, every row is "pending" forever and the number is noise. */}
+        {pending > 0 && state !== 'signed-out' && (
+          <span className="small dim">{pending > 99 ? '99+' : pending}</span>
+        )}
       </button>
       {open && (
         <AccountSheet

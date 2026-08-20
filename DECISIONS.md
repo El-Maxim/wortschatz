@@ -45,3 +45,33 @@ being resurrected by it.
 There was no preinstalled Chromium and no Playwright browser cache. Playwright
 drives the system Google Chrome (`channel: 'chrome'`) instead of downloading a
 ~150 MB browser — same automation, no extra disk.
+
+## Repository is public, not private (Phase 0)
+
+The spec asked for a private repo, GitHub Pages hosting, and zero recurring cost.
+On GitHub's free plan those three cannot all hold: Pages refuses to serve a
+private repository (HTTP 422, "Your current plan does not support GitHub Pages
+for this repository"). Zero cost was the non-negotiable constraint, so the repo
+is public. Nothing sensitive is exposed — `.env` is gitignored, and all user data
+lives in Supabase and IndexedDB, never in git. The user chose this over the
+alternative of hosting elsewhere.
+
+## Auxiliary verb when Wiktionary lists both
+
+Wiktionary gives some verbs two auxiliaries ("auxiliary haben or sein", e.g.
+*aufstehen*). The pipeline stores `sein` in that case. It is the marked form a
+learner has to remember, and it matches the everyday motion/change-of-state
+reading — *ich bin aufgestanden*, not *ich habe aufgestanden*.
+
+## Long glosses are shortened, not dropped
+
+Entries are capped at 90 characters per gloss, but Wiktionary's *primary* sense is
+often its most verbose ("to get up (move from a sitting or lying position…)").
+Discarding over-long glosses left words showing only their marginal senses, so a
+gloss that overruns is cut at its trailing parenthetical instead.
+
+## Deep links return HTTP 404 by design
+
+GitHub Pages has no server-side rewrite, so `/wortschatz/ueben` returns 404 and
+`404.html` redirects into the SPA. The page renders correctly, but the browser
+still logs the 404 — expected, and filtered out of the e2e error assertion.
