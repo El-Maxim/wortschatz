@@ -1,0 +1,26 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+dev-dist/
+
+# secrets — never commit
+.env
+.env.local
+.env.*.local
+
+# dictionary pipeline scratch (raw downloads are large; only committed output ships)
+scripts/.cache/
+scripts/tmp/
+
+# test artifacts
+playwright-report/
+test-results/
+screenshots/
+
+# editor / OS
+.DS_Store
+.vscode/
+.idea/
+*.log
