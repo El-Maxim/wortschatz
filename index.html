@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#1b1b1f" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Wortschatz" />
+    <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
+    <title>Wortschatz</title>
+    <script>
+      // Restores the real path after the 404.html redirect (see public/404.html).
+      (function () {
+        var q = window.location.search
+        if (q.charAt(1) !== '/') return
+        var decoded = q.slice(2).split('&').map(function (part) {
+          return part.replace(/~and~/g, '&')
+        })
+        window.history.replaceState(
+          null, null,
+          window.location.pathname.replace(/\/$/, '') + '/' + decoded[0] +
+          (decoded[1] ? '?' + decoded.slice(1).join('&') : '') + window.location.hash
+        )
+      })()
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

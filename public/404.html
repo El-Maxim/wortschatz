@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Wortschatz</title>
+    <script>
+      // GitHub Pages has no server-side rewrite, so a deep link like
+      // /wortschatz/ueben lands here. Encode the path into a query string and
+      // bounce to index.html, which restores it (see the snippet in index.html).
+      (function () {
+        var segments = 1 // '/wortschatz' is the project-page prefix
+        var l = window.location
+        var path = l.pathname.split('/').slice(1 + segments).join('/')
+        l.replace(
+          l.protocol + '//' + l.host + l.pathname.split('/').slice(0, 1 + segments).join('/') + '/?/' +
+          path.replace(/&/g, '~and~') +
+          (l.search ? '&' + l.search.slice(1).replace(/&/g, '~and~') : '') +
+          l.hash
+        )
+      })()
+    </script>
+  </head>
+  <body></body>
+</html>
