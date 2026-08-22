@@ -89,9 +89,23 @@ Pushing to `main` builds and deploys to GitHub Pages automatically.
 2. Copy `.env.example` to `.env` and fill in the three values from
    Project Settings → API
 3. Paste `supabase/migrations/0001_init.sql` into the Supabase SQL editor and run it
-4. Add `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` as repository secrets so the
+4. In **Authentication → URL Configuration**, set the **Site URL** to the deployed
+   address and add it to **Redirect URLs** with a `**` suffix:
+
+   ```
+   Site URL:      https://el-maxim.github.io/wortschatz/
+   Redirect URLs: https://el-maxim.github.io/wortschatz/**
+                  http://localhost:4173/wortschatz/**
+   ```
+
+   Skip this and magic links silently bounce to `http://localhost:3000` — Supabase
+   ignores a redirect that is not on the allow-list and falls back to the Site URL,
+   whose default is localhost.
+5. Add `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` as repository secrets so the
    deployed build can sync too
-5. Open the app, click the sync dot in the header, and sign in by email
+6. Open the app, click the sync dot in the header, and sign in by email. Open the
+   link on the same device you requested it from — the session is per-browser.
+   Each link works once; request a new one rather than re-clicking an old one.
 
 `SUPABASE_SERVICE_ROLE_KEY` is used **only** by `/coach`. It has no `VITE_` prefix
 precisely so that Vite cannot bundle it into the client.
