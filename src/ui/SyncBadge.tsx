@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { client, currentSession, isConfigured, signIn, signOut } from '../lib/supabase'
+import { Sheet } from './Sheet'
 import { onSyncState, pendingCount, startSync, syncNow, type SyncState } from '../lib/sync'
 
 const DOT: Record<SyncState, { cls: string; label: string }> = {
@@ -92,8 +93,8 @@ function AccountSheet({ session, state, detail, pending, onClose }: {
   }
 
   return (
-    <div className="sheet-backdrop" onClick={onClose}>
-      <div className="sheet" onClick={e => e.stopPropagation()} role="dialog" aria-label="Sync and account">
+    <Sheet label="Sync and account" onClose={onClose}>
+      <>
         <div className="spread" style={{ marginBottom: 12 }}>
           <strong>Sync</strong>
           <button className="btn ghost" onClick={onClose} aria-label="Close">✕</button>
@@ -158,7 +159,7 @@ function AccountSheet({ session, state, detail, pending, onClose }: {
             </button>
           </>
         )}
-      </div>
-    </div>
+      </>
+    </Sheet>
   )
 }

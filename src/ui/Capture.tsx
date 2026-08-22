@@ -4,6 +4,7 @@ import { lookup, prefetch, suggest } from '../lib/dict'
 import { speak, speechAvailable } from '../lib/tts'
 import { articleForGender } from '../lib/normalize'
 import { captureWord, findExisting } from '../db/words'
+import { Sheet } from './Sheet'
 
 interface Props {
   prefill?: string
@@ -28,12 +29,6 @@ export function Capture({ prefill = '', onClose }: Props) {
   const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => { inputRef.current?.focus() }, [])
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
-    addEventListener('keydown', onKey)
-    return () => removeEventListener('keydown', onKey)
-  }, [onClose])
 
   // Debounced live lookup while typing.
   useEffect(() => {
@@ -66,25 +61,23 @@ export function Capture({ prefill = '', onClose }: Props) {
 
   if (saved) {
     return (
-      <div className="sheet-backdrop" onClick={onClose}>
-        <div className="sheet" onClick={e => e.stopPropagation()}>
-          <div className="empty">
+      <Sheet label="Word saved" onClose={onClose}>
+        <div className="empty">
             <span className="glyph">{saved.unresolved ? '📮' : '✅'}</span>
             <strong>{saved.article ? `${saved.article} ` : ''}{saved.lemma}</strong> saved
             <div className="small dim" style={{ marginTop: 6 }}>
               {saved.unresolved
                 ? 'Not in the dictionary — queued for the coach to research.'
                 : 'Card created. It is due in your next Üben session.'}
-            </div>
           </div>
         </div>
-      </div>
+      </Sheet>
     )
   }
 
   return (
-    <div className="sheet-backdrop" onClick={onClose}>
-      <div className="sheet" onClick={e => e.stopPropagation()} role="dialog" aria-label="Add a word">
+    <Sheet label="Add a word" onClose={onClose}>
+      <>
         <div className="spread" style={{ marginBottom: 10 }}>
           <strong>Neues Wort</strong>
           <button className="btn ghost" onClick={onClose} aria-label="Close">✕</button>
@@ -174,7 +167,7 @@ export function Capture({ prefill = '', onClose }: Props) {
         <div className="small dim" style={{ textAlign: 'center', marginTop: 8 }}>
           Enter saves · Esc closes
         </div>
-      </div>
-    </div>
+      </>
+    </Sheet>
   )
 }

@@ -99,3 +99,16 @@ Newer Supabase projects do not automatically grant new tables in `public` to the
 API roles, so RLS policies alone left `authenticated` and `service_role` with no
 access at all (`permission denied for table words`). The migration now grants
 explicitly and sets default privileges, rather than relying on project defaults.
+
+## Sheets render through a portal
+
+`backdrop-filter` on the sticky header makes it a containing block for
+`position: fixed` descendants. The sign-in sheet was rendered from inside the
+header, so its "full-screen" backdrop was only as tall as the header and the
+sheet was pushed off the top of the screen — the email field sat at y = -68px
+and could not be reached on a phone.
+
+`src/ui/Sheet.tsx` now portals every sheet into `<body>`, making it independent
+of where it is mounted from, and both the capture and account sheets use it.
+Sheet height also moved from `vh` to `dvh`, since iOS counts browser chrome in
+`vh` and would otherwise put the buttons below the visible area.

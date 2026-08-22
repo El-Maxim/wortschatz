@@ -56,14 +56,32 @@ async function rest(path, { method = 'GET', body, service = false } = {}) {
 
 // ---------------------------------------------------------------- sign in
 
-const tokenRes = await fetch(`${URL_}/auth/v1/token?grant_type=password`, {
-  method: 'POST',
-  headers: { apikey: ANON, 'Content-Type': 'application/json' },
-  body: JSON.stringify({ email: EMAIL, password: PASSWORD }),
-})
-const session = await tokenRes.json()
+async function signIn() {
+  const res = await fetch(`${URL_}/auth/v1/token?grant_type=password`, {
+    method: 'POST',
+    headers: { apikey: ANON, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: EMAIL, password: PASSWORD }),
+  })
+  return res.json()
+}
+
+// The suite provisions its own throwaway account and removes it at the end, so
+// it can be re-run against a project that holds only the real user's data.
+let session = await signIn()
+let createdUser = false
+if (!session.access_token) {
+  const created = await fetch(`${URL_}/auth/v1/admin/users`, {
+    method: 'POST',
+    headers: { apikey: SERVICE, Authorization: `Bearer ${SERVICE}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: EMAIL, password: PASSWORD, email_confirm: true }),
+  }).then(r => r.json())
+  if (!created.id) { console.error('Could not create the test user:', created); process.exit(1) }
+  createdUser = true
+  session = await signIn()
+}
 const token = session.access_token
 if (!token) { console.error('Could not sign in:', session); process.exit(1) }
+console.log(`  test account: ${EMAIL}${createdUser ? ' (created for this run)' : ''}`)
 
 // Start from a clean slate so counts are unambiguous.
 await rest('words?id=not.is.null', { method: 'DELETE' })
@@ -179,9 +197,19 @@ check('sync queue drained', drained === 0, `${drained} left`)
 
 await browser.close()
 
-// Leave the project clean for the coach tests.
+// Leave the project exactly as it was found.
 await rest('words?id=not.is.null', { method: 'DELETE' })
 await rest('cards?id=not.is.null', { method: 'DELETE' })
+await rest('grammar_topics?id=not.is.null', { method: 'DELETE' })
+await rest('exercises?id=not.is.null', { method: 'DELETE' })
+if (createdUser) {
+  // Deleting the account cascades to any row this run left behind.
+  await fetch(`${URL_}/auth/v1/admin/users/${session.user.id}`, {
+    method: 'DELETE',
+    headers: { apikey: SERVICE, Authorization: `Bearer ${SERVICE}` },
+  })
+  console.log('  test account removed')
+}
 
 const failed = results.filter(r => !r.ok)
 console.log(`\n${results.length - failed.length}/${results.length} checks passed`)

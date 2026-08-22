@@ -282,8 +282,11 @@ a { color: var(--accent); }
   max-width: 560px;
   border-radius: 16px 16px 0 0;
   padding: 16px 16px calc(20px + env(safe-area-inset-bottom));
-  max-height: 88vh;
+  /* dvh, not vh: on iOS the browser chrome is part of vh, so a vh-sized sheet
+     extends below the visible area and its buttons become unreachable. */
+  max-height: 88dvh;
   overflow-y: auto;
+  overscroll-behavior: contain;
 }
 @media (min-width: 1024px) {
   .sheet-backdrop { align-items: center; }
