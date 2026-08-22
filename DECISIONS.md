@@ -112,3 +112,16 @@ and could not be reached on a phone.
 of where it is mounted from, and both the capture and account sheets use it.
 Sheet height also moved from `vh` to `dvh`, since iOS counts browser chrome in
 `vh` and would otherwise put the buttons below the visible area.
+
+## Password sign-in alongside magic links
+
+An installed PWA on iOS gets its own storage sandbox, and a magic link always
+opens in Safari — so the session it creates is invisible to the home-screen app,
+which can therefore never be signed in by email. Supabase's shared SMTP also
+caps sign-in emails at two per hour on the free tier, which the repeated
+attempts hit.
+
+Password sign-in is now the primary path (`signInWithPassword`), with the magic
+link kept as a fallback and as the way to bootstrap an account that has no
+password yet. The account panel gained a "set a password" section, since an
+account created by a magic link has none.

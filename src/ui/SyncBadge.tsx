@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { Session } from '@supabase/supabase-js'
-import { client, currentSession, isConfigured, signIn, signOut } from '../lib/supabase'
+import { client, currentSession, isConfigured, setPassword, signIn, signInWithPassword, signOut } from '../lib/supabase'
 import { Sheet } from './Sheet'
 import { onSyncState, pendingCount, startSync, syncNow, type SyncState } from '../lib/sync'
 
@@ -81,21 +81,42 @@ function AccountSheet({ session, state, detail, pending, onClose, onOpened }: {
   onOpened: () => void
 }) {
   const [email, setEmail] = useState('')
+  const [password, setPasswordValue] = useState('')
   const [sent, setSent] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [showPasswordSetup, setShowPasswordSetup] = useState(false)
+  const [newPassword, setNewPassword] = useState('')
+  const [passwordSaved, setPasswordSaved] = useState(false)
 
   // The queue drains in the background; re-read it so the panel does not show a
   // count left over from before the last sync finished.
   useEffect(onOpened, [onOpened])
 
-  async function submit() {
+  async function submitPassword() {
+    if (!email.trim() || !password) return
+    setBusy(true)
+    const { error: err } = await signInWithPassword(email.trim(), password)
+    setBusy(false)
+    setError(err)
+  }
+
+  async function submitMagicLink() {
     if (!email.trim()) return
     setBusy(true)
     const { error: err } = await signIn(email.trim())
     setBusy(false)
     if (err) setError(err)
     else { setSent(true); setError(null) }
+  }
+
+  async function savePassword() {
+    if (newPassword.length < 8) { setError('Use at least 8 characters.'); return }
+    setBusy(true)
+    const { error: err } = await setPassword(newPassword)
+    setBusy(false)
+    if (err) setError(err)
+    else { setPasswordSaved(true); setError(null); setNewPassword('') }
   }
 
   return (
@@ -136,6 +157,46 @@ function AccountSheet({ session, state, detail, pending, onClose, onOpened }: {
               <button className="btn primary" style={{ flex: 1 }} onClick={() => void syncNow()}>Sync now</button>
               <button className="btn ghost" onClick={async () => { await signOut(); onClose() }}>Sign out</button>
             </div>
+
+            {passwordSaved ? (
+              <div className="muted-box small" style={{ marginTop: 12, background: 'var(--ok-soft)', color: 'var(--ok)' }}>
+                Password saved. You can now sign in with it directly — including inside the
+                app on your home screen.
+              </div>
+            ) : showPasswordSetup ? (
+              <div className="muted-box" style={{ marginTop: 12 }}>
+                <strong className="small">Set a password</strong>
+                <p className="small dim" style={{ marginTop: 4 }}>
+                  An app added to the home screen has its own storage and cannot see a
+                  session created in the browser, so a sign-in link can never reach it.
+                  A password can.
+                </p>
+                <input
+                  className="input"
+                  style={{ marginTop: 8 }}
+                  type="password"
+                  autoComplete="new-password"
+                  placeholder="At least 8 characters"
+                  value={newPassword}
+                  onChange={e => setNewPassword(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') void savePassword() }}
+                />
+                <div className="wrap" style={{ marginTop: 8 }}>
+                  <button className="btn primary small" style={{ flex: 1, minHeight: 38 }}
+                    disabled={busy || newPassword.length < 8} onClick={savePassword}>
+                    {busy ? 'Saving…' : 'Save password'}
+                  </button>
+                  <button className="btn ghost small" style={{ minHeight: 38 }}
+                    onClick={() => { setShowPasswordSetup(false); setError(null) }}>Cancel</button>
+                </div>
+              </div>
+            ) : (
+              <button className="btn ghost wide small" style={{ marginTop: 10, minHeight: 38 }}
+                onClick={() => setShowPasswordSetup(true)}>
+                Set a password (needed for the home-screen app)
+              </button>
+            )}
+            {error && <div className="small" style={{ color: 'var(--bad)', marginTop: 8 }}>{error}</div>}
           </>
         ) : sent ? (
           <p className="small" style={{ marginTop: 12 }}>
@@ -154,15 +215,33 @@ function AccountSheet({ session, state, detail, pending, onClose, onOpened }: {
               inputMode="email"
               autoCapitalize="off"
               autoCorrect="off"
+              autoComplete="username"
               placeholder="you@example.com"
               value={email}
               onChange={e => setEmail(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter') void submit() }}
+            />
+            <input
+              className="input"
+              style={{ marginTop: 8 }}
+              type="password"
+              autoComplete="current-password"
+              placeholder="Password"
+              value={password}
+              onChange={e => setPasswordValue(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') void submitPassword() }}
             />
             {error && <div className="small" style={{ color: 'var(--bad)', marginTop: 8 }}>{error}</div>}
-            <button className="btn primary wide" style={{ marginTop: 10 }} disabled={busy || !email.trim()} onClick={submit}>
-              {busy ? 'Sending…' : 'Send magic link'}
+            <button className="btn primary wide" style={{ marginTop: 10 }}
+              disabled={busy || !email.trim() || !password} onClick={submitPassword}>
+              {busy ? 'Signing in…' : 'Anmelden'}
             </button>
+            <button className="btn ghost wide small" style={{ marginTop: 8, minHeight: 38 }}
+              disabled={busy || !email.trim()} onClick={submitMagicLink}>
+              Email me a sign-in link instead
+            </button>
+            <div className="small dim" style={{ textAlign: 'center', marginTop: 8 }}>
+              No password yet? Sign in by email once, then set one from this panel.
+            </div>
           </>
         )}
       </>
