@@ -79,6 +79,13 @@ Fetch, in this order:
    (`sb GET "grammar_topics?select=slug,title,status"`) and every suggestion ever made
    (`sb GET "suggestions?select=lemma,status"`).
 
+   **The six curated topics are bundled in the app and deliberately never synced**, so
+   they will *not* come back from that query. Treat these slugs as already taken:
+   `der-die-das`, `akkusativ-dativ`, `wortstellung`, `trennbare-verben`,
+   `perfekt-praeteritum`, `adjektivendungen` — check `data/grammar/` for the current
+   list. Exercises you write for one of them are normal `coach` rows and do sync; only
+   the bundled `template` rows stay local.
+
 Before writing anything, read `src/types.ts`. Every JSON payload you insert **must**
 validate against the interfaces there (`ExercisePayload`, `ExamItem`, `Suggestion`,
 `VerbProps`). Remember the naming split: **Postgres columns are snake_case**

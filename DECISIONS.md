@@ -125,3 +125,28 @@ Password sign-in is now the primary path (`signInWithPassword`), with the magic
 link kept as a fallback and as the way to bootstrap an account that has no
 password yet. The account panel gained a "set a password" section, since an
 account created by a magic link has none.
+
+## Bundled content is never synced
+
+The six curated topics and their 72 exercises ship inside the app, so every
+device seeds an identical copy. Syncing them added no information and could not
+be made to converge:
+
+- topics collided on `unique (user_id, slug)` — each device generated its own
+  random id for the same slug, so the second device's push failed permanently
+  ("duplicate key value violates unique constraint")
+- exercises have no natural key at all, so an upsert could not merge them; each
+  device's copy inserted alongside the other's and the pool doubled to 144
+
+`seedGrammar` now writes them straight to Dexie without queueing, and `sync`
+skips them in both directions. Their ids are still derived from the slug (uuid
+v5), because `exercise_attempts` do sync and reference an exercise by id — a
+drill answered on the phone has to mean the same thing on the laptop.
+
+Grammar topics and exercises the *coach* writes (`generated` / `coach`) are real
+data and sync normally. `grammar_topics` also upserts on `(user_id, slug)` as a
+safety net.
+
+Note that the seed ids are global rather than per-account, which is fine for the
+single-user app this is specified to be, but would let two accounts in one
+project collide on the primary key.

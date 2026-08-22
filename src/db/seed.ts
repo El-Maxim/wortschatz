@@ -1,5 +1,5 @@
 import type { Exercise, ExercisePayload, ExerciseType, GrammarTopic, Level } from '../types'
-import { db, save } from './dexie'
+import { db } from './dexie'
 import { nowIso } from '../lib/scheduler'
 
 // The six curated topics, written at build time and bundled with the app.
@@ -59,7 +59,78 @@ const SEEDS = [
  * have practised it, and the coach may have added exercises to it), and a topic
  * added to the bundle in a later release is inserted on next launch.
  */
+/**
+ * Bundled content is stored locally and never queued for sync.
+ *
+ * The six curated topics and their 72 exercises ship inside the app, so every
+ * device already has an identical copy — uploading them adds no information.
+ * Worse, it cannot be made to converge: topics collide on
+ * `unique (user_id, slug)`, and exercises have no natural key at all, so each
+ * device's copy inserts alongside the others and the pool doubles. Keeping them
+ * out of sync entirely removes the whole class of problem.
+ *
+ * Their ids are still derived from the slug, because `exercise_attempts` do
+ * sync and reference an exercise by id — a drill answered on the phone has to
+ * mean the same thing on the laptop.
+ */
+async function putLocal<T extends { id: string }>(
+  table: 'grammarTopics' | 'exercises',
+  row: T,
+): Promise<void> {
+  await (db[table] as unknown as { put(r: T): Promise<unknown> }).put(row)
+  await db.syncQueue.where('[table+rowId]').equals([table, row.id]).delete()
+}
+
+/**
+ * Renumbers seeded rows that were created before ids were derived from the slug.
+ *
+ * Those installs hold the six curated topics — and their 72 exercises — under
+ * ids generated randomly on that device. Pushing them would insert a second
+ * copy of every exercise alongside the set another device already uploaded, and
+ * the topics would collide on `unique (user_id, slug)`. Rewriting them to the
+ * deterministic ids makes every device agree on one identity per row, so the
+ * upserts merge instead of multiplying.
+ *
+ * Safe to run on every launch: bundled content carries no user state, and once
+ * the ids match it does nothing.
+ */
+async function repairSeedIds(): Promise<void> {
+  for (const seed of SEEDS) {
+    const wantedId = await stableId(`topic:${seed.slug}`)
+    const topic = await db.grammarTopics.where('slug').equals(seed.slug).first()
+    if (!topic || topic.id === wantedId || topic.status !== 'curated') continue
+
+    await db.grammarTopics.delete(topic.id)
+    await db.syncQueue.where('[table+rowId]').equals(['grammarTopics', topic.id]).delete()
+    await putLocal('grammarTopics', { ...topic, id: wantedId })
+
+    // The topic's bundled exercises are re-keyed the same way. Only `template`
+    // rows are touched; anything the coach wrote keeps its own id.
+    const stale = await db.exercises
+      .filter(e => e.topicSlug === seed.slug && e.source === 'template')
+      .toArray()
+    for (const exercise of stale) {
+      await db.exercises.delete(exercise.id)
+      await db.syncQueue.where('[table+rowId]').equals(['exercises', exercise.id]).delete()
+    }
+    for (const [index, item] of seed.exercises.entries()) {
+      await putLocal('exercises', {
+        id: await stableId(`exercise:${seed.slug}:${index}`),
+        topicSlug: seed.slug,
+        type: item.type as ExerciseType,
+        payload: item.payload,
+        source: 'template',
+        createdAt: topic.createdAt,
+        updatedAt: nowIso(),
+        deleted: false,
+      })
+    }
+  }
+}
+
 export async function seedGrammar(): Promise<void> {
+  await repairSeedIds()
+
   for (const seed of SEEDS) {
     const existing = await db.grammarTopics.where('slug').equals(seed.slug).first()
     if (existing) continue
@@ -75,7 +146,7 @@ export async function seedGrammar(): Promise<void> {
       updatedAt: nowIso(),
       deleted: false,
     }
-    await save('grammarTopics', topic)
+    await putLocal('grammarTopics', topic)
 
     for (const [index, item] of seed.exercises.entries()) {
       const exercise: Exercise = {
@@ -88,7 +159,7 @@ export async function seedGrammar(): Promise<void> {
         updatedAt: nowIso(),
         deleted: false,
       }
-      await save('exercises', exercise)
+      await putLocal('exercises', exercise)
     }
   }
 }

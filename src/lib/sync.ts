@@ -22,6 +22,16 @@ interface Mapping {
   remote: string
   /** local field -> remote column, for fields that are not plain snake_case. */
   columns: Record<string, string>
+  /**
+   * Natural-key columns to resolve an upsert against, for tables that carry a
+   * unique constraint besides the primary key.
+   *
+   * Without this, a device pushes a curated topic under its own id while the
+   * server holds the same slug under a different one, and the insert dies on
+   * `grammar_topics_user_id_slug_key` — permanently, since every retry repeats
+   * it. Resolving on (user_id, slug) merges the two into one row instead.
+   */
+  conflictTarget?: string
 }
 
 /** camelCase -> snake_case for everything not listed explicitly. */
@@ -33,15 +43,30 @@ const TABLES: Mapping[] = [
   { table: 'words', remote: 'words', columns: {} },
   { table: 'cards', remote: 'cards', columns: {} },
   { table: 'reviewLog', remote: 'review_log', columns: {} },
-  { table: 'grammarTopics', remote: 'grammar_topics', columns: {} },
+  { table: 'grammarTopics', remote: 'grammar_topics', columns: {}, conflictTarget: 'user_id,slug' },
   { table: 'exercises', remote: 'exercises', columns: {} },
   { table: 'exerciseAttempts', remote: 'exercise_attempts', columns: {} },
   { table: 'coachRequests', remote: 'coach_requests', columns: {} },
   { table: 'suggestions', remote: 'suggestions', columns: {} },
-  { table: 'exams', remote: 'exams', columns: {} },
+  { table: 'exams', remote: 'exams', columns: {}, conflictTarget: 'user_id,iso_week' },
 ]
 
 const BY_TABLE = new Map(TABLES.map(m => [m.table, m]))
+
+/**
+ * Content that ships inside the app: the curated topics and their exercises.
+ *
+ * Every device seeds an identical copy locally, so these rows are deliberately
+ * excluded from sync in both directions. Uploading them would duplicate the
+ * pool (exercises have no natural key to merge on) and collide on
+ * `unique (user_id, slug)`. Anything the coach wrote — `generated` topics and
+ * `coach` exercises — is real data and syncs normally.
+ */
+function isBundled(table: SyncTable, row: Record<string, unknown>): boolean {
+  if (table === 'grammarTopics') return row.status === 'curated'
+  if (table === 'exercises') return row.source === 'template'
+  return false
+}
 
 function toRemote(row: Record<string, unknown>, mapping: Mapping): Record<string, unknown> {
   const out: Record<string, unknown> = {}
@@ -123,10 +148,22 @@ async function push(): Promise<void> {
     const mapping = BY_TABLE.get(table)
     if (!mapping) continue
     const store = (db as unknown as Record<SyncTable, { bulkGet(ids: string[]): Promise<unknown[]> }>)[table]
-    const rows = (await store.bulkGet(ids)).filter(Boolean) as Record<string, unknown>[]
+    const all = (await store.bulkGet(ids)).filter(Boolean) as Record<string, unknown>[]
+    const rows = all.filter(r => !isBundled(table, r))
+    // Bundled rows may still be queued from a build that synced them; drop the
+    // queue entries so they do not retry forever.
+    const skipped = all.filter(r => isBundled(table, r)).map(r => String(r.id))
+    if (skipped.length) {
+      await db.syncQueue.bulkDelete(
+        queued.filter(q => q.table === table && skipped.includes(q.rowId)).map(q => q.seq!),
+      )
+    }
     if (!rows.length) continue
 
-    const { error } = await client!.from(mapping.remote).upsert(rows.map(r => toRemote(r, mapping)))
+    const payload = rows.map(r => toRemote(r, mapping))
+    const { error } = mapping.conflictTarget
+      ? await client!.from(mapping.remote).upsert(payload, { onConflict: mapping.conflictTarget })
+      : await client!.from(mapping.remote).upsert(payload)
     if (error) throw new Error(`push ${mapping.remote}: ${error.message}`)
 
     // Only clear what we actually sent; anything queued meanwhile survives.
@@ -157,6 +194,8 @@ async function pull(): Promise<void> {
 
     for (const remoteRow of data as Record<string, unknown>[]) {
       const local = toLocal(remoteRow, mapping)
+      // A copy uploaded by an older build; the local seed is authoritative.
+      if (isBundled(mapping.table, local)) continue
       const existing = await store.get(String(local.id))
       // LWW: a remote row only wins if it is strictly newer than what we hold.
       if (existing && !newer(local.updatedAt, existing.updatedAt)) continue
