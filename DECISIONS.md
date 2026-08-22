@@ -150,3 +150,20 @@ safety net.
 Note that the seed ids are global rather than per-account, which is fine for the
 single-user app this is specified to be, but would let two accounts in one
 project collide on the primary key.
+
+## The sync watermark comes from the data, not the clock
+
+`pull()` originally recorded `lastSyncAt` as `new Date().toISOString()` — this
+device's clock — and then asked for rows with `updated_at` greater than it. But
+`updated_at` is stamped by whichever device *wrote* the row. A laptop that
+finished a sync at its own 22:30 would thereafter ignore a word the phone had
+stamped 22:28, permanently, because the watermark only moves forward. The same
+hole swallowed anything written between the pull query and the stamp.
+
+The watermark is now the newest `updated_at` actually received from the server,
+which is immune to both. `syncWatermarkVersion` forces one full re-pull on
+devices still holding a clock-derived watermark, so they recover the rows that
+scheme skipped.
+
+`scripts/e2e-clockskew.mjs` reproduces it: device B's watermark is pushed ten
+minutes into the future, device A writes a word, and B must still receive it.

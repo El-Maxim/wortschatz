@@ -11,7 +11,10 @@
     "dict": "node scripts/build-dictionary.mjs",
     "icons": "node scripts/make-icons.mjs",
     "sim": "node scripts/seed-reviews.mjs",
-    "setup": "node scripts/setup-env.mjs"
+    "setup": "node scripts/setup-env.mjs",
+    "e2e": "node scripts/e2e.mjs",
+    "e2e:sync": "node scripts/e2e-sync.mjs",
+    "e2e:skew": "node scripts/e2e-clockskew.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.112.3",

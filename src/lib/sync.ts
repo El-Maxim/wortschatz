@@ -121,7 +121,6 @@ export async function syncNow(): Promise<SyncState> {
   try {
     await push()
     await pull()
-    await setMeta('lastSyncAt', new Date().toISOString())
     emit('idle')
     return 'idle'
   } catch (error) {
@@ -174,8 +173,31 @@ async function push(): Promise<void> {
   }
 }
 
+/**
+ * Bumped when the watermark's meaning changes. A device holding a watermark
+ * from the old scheme re-pulls everything once, which is how it recovers rows
+ * that scheme skipped.
+ */
+const WATERMARK_VERSION = 2
+
 async function pull(): Promise<void> {
+  if (await getMeta<number>('syncWatermarkVersion', 1) < WATERMARK_VERSION) {
+    await setMeta('lastSyncAt', '1970-01-01T00:00:00.000Z')
+    await setMeta('syncWatermarkVersion', WATERMARK_VERSION)
+  }
+
   const since = await getMeta<string>('lastSyncAt', '1970-01-01T00:00:00.000Z')
+  /**
+   * The high-water mark is the newest `updated_at` actually seen from the
+   * server — never the local clock.
+   *
+   * Rows are stamped by whichever device wrote them, so a watermark taken from
+   * this device's clock silently hides anything a device whose clock runs
+   * slightly behind has written. It also skips whatever lands between the pull
+   * query and the stamp. Advancing only to data we have really received makes
+   * the watermark immune to both.
+   */
+  let highest = since
 
   for (const mapping of TABLES) {
     const { data, error } = await client!
@@ -186,6 +208,11 @@ async function pull(): Promise<void> {
       .limit(2000)
     if (error) throw new Error(`pull ${mapping.remote}: ${error.message}`)
     if (!data?.length) continue
+
+    for (const row of data as Record<string, unknown>[]) {
+      const stamp = String(row.updated_at ?? '')
+      if (stamp && Date.parse(stamp) > Date.parse(highest)) highest = stamp
+    }
 
     const store = (db as unknown as Record<SyncTable, {
       get(id: string): Promise<Record<string, unknown> | undefined>
@@ -214,6 +241,9 @@ async function pull(): Promise<void> {
       }
     }
   }
+
+  await setMeta('lastSyncAt', highest)
+  await setMeta('syncWatermarkVersion', WATERMARK_VERSION)
 }
 
 /** The unique (non-primary-key) index each table carries, if any. */
