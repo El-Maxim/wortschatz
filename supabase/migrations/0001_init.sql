@@ -189,5 +189,25 @@ begin
 end
 $$;
 
+-- ---------------------------------------------------------------- grants
+--
+-- RLS decides *which rows* a role may touch; table GRANTs decide whether it may
+-- touch the table at all. Both are required. Newer Supabase projects do not
+-- automatically grant new public tables to the API roles, so do it explicitly
+-- rather than depending on the project's default privileges.
+
+grant usage on schema public to anon, authenticated, service_role;
+
+-- The app signs in as `authenticated`; RLS then restricts it to its own rows.
+grant select, insert, update, delete on all tables in schema public to authenticated;
+
+-- `service_role` bypasses RLS and is used only by the /coach command.
+grant select, insert, update, delete on all tables in schema public to service_role;
+
+-- Anything added later inherits the same shape.
+alter default privileges in schema public
+  grant select, insert, update, delete on tables to authenticated, service_role;
+
 -- The anon role gets nothing: this app has no public signup and no public data.
 revoke all on all tables in schema public from anon;
+alter default privileges in schema public revoke all on tables from anon;

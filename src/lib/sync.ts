@@ -160,10 +160,53 @@ async function pull(): Promise<void> {
       const existing = await store.get(String(local.id))
       // LWW: a remote row only wins if it is strictly newer than what we hold.
       if (existing && !newer(local.updatedAt, existing.updatedAt)) continue
-      // A row pulled from the server must not be pushed straight back.
-      await store.put(local)
+      try {
+        // A row pulled from the server must not be pushed straight back.
+        await store.put(local)
+      } catch (error) {
+        // Dexie enforces unique indexes on `slug` and `isoWeek`. An incoming row
+        // can legitimately carry a different id for the same logical record —
+        // an install that seeded its curated topics before ids were derived from
+        // the slug. Drop the stale local row and take the server's version;
+        // anything else leaves that device unable to sync at all.
+        if (!(error instanceof Error) || error.name !== 'ConstraintError') throw error
+        const healed = await healConflict(mapping.table, local)
+        if (!healed) throw error
+      }
     }
   }
+}
+
+/** The unique (non-primary-key) index each table carries, if any. */
+const UNIQUE_KEY: Partial<Record<SyncTable, string>> = {
+  grammarTopics: 'slug',
+  exams: 'isoWeek',
+}
+
+/**
+ * Resolves a unique-index clash by deleting the local row that squats on the
+ * key under a different id, then storing the server's version. Returns false if
+ * the clash was something else, so the caller can surface the real error.
+ */
+async function healConflict(table: SyncTable, incoming: Record<string, unknown>): Promise<boolean> {
+  const field = UNIQUE_KEY[table]
+  if (!field) return false
+  const value = incoming[field]
+  if (value === undefined) return false
+
+  const store = (db as unknown as Record<SyncTable, {
+    where(f: string): { equals(v: unknown): { first(): Promise<Record<string, unknown> | undefined> } }
+    delete(id: string): Promise<void>
+    put(row: Record<string, unknown>): Promise<unknown>
+  }>)[table]
+
+  const squatter = await store.where(field).equals(value).first()
+  if (!squatter || squatter.id === incoming.id) return false
+
+  await store.delete(String(squatter.id))
+  await db.syncQueue.where('[table+rowId]').equals([table, String(squatter.id)]).delete()
+  await store.put(incoming)
+  return true
 }
 
 let timer: ReturnType<typeof setInterval> | null = null

@@ -10,7 +10,8 @@
     "typecheck": "tsc -b --noEmit",
     "dict": "node scripts/build-dictionary.mjs",
     "icons": "node scripts/make-icons.mjs",
-    "sim": "node scripts/seed-reviews.mjs"
+    "sim": "node scripts/seed-reviews.mjs",
+    "setup": "node scripts/setup-env.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.112.3",

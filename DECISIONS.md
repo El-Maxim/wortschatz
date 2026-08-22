@@ -75,3 +75,27 @@ gloss that overruns is cut at its trailing parenthetical instead.
 GitHub Pages has no server-side rewrite, so `/wortschatz/ueben` returns 404 and
 `404.html` redirects into the SPA. The page renders correctly, but the browser
 still logs the 404 — expected, and filtered out of the e2e error assertion.
+
+## Seeded content uses deterministic ids
+
+The six curated topics are created independently on every device, so a random
+uuid gave the same topic a different id on the phone and on the laptop. The
+second device to sync then tried to hold two rows with one slug and hit the
+unique index — `ConstraintError` in Dexie, and `unique (user_id, slug)` on
+Postgres — which failed the whole sync, not just that row.
+
+Seeded topics and exercises now derive their id from their slug (RFC 4122 v5,
+fixed namespace) in `src/db/seed.ts`, so every device computes the same id and
+the rows merge. `pull()` additionally self-heals a unique-index clash by
+dropping the stale local row, so installs that already seeded with random ids
+recover instead of being permanently stuck.
+
+Caught by the Phase 6 acceptance run, which is the only test that exercises two
+devices against one account.
+
+## Explicit table grants in the migration
+
+Newer Supabase projects do not automatically grant new tables in `public` to the
+API roles, so RLS policies alone left `authenticated` and `service_role` with no
+access at all (`permission denied for table words`). The migration now grants
+explicitly and sets default privileges, rather than relying on project defaults.
