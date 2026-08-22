@@ -60,6 +60,7 @@ export function SyncBadge() {
       </button>
       {open && (
         <AccountSheet
+          onOpened={() => void pendingCount().then(setPending)}
           session={session}
           state={state}
           detail={detail}
@@ -71,17 +72,22 @@ export function SyncBadge() {
   )
 }
 
-function AccountSheet({ session, state, detail, pending, onClose }: {
+function AccountSheet({ session, state, detail, pending, onClose, onOpened }: {
   session: Session | null
   state: SyncState
   detail?: string
   pending: number
   onClose: () => void
+  onOpened: () => void
 }) {
   const [email, setEmail] = useState('')
   const [sent, setSent] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+
+  // The queue drains in the background; re-read it so the panel does not show a
+  // count left over from before the last sync finished.
+  useEffect(onOpened, [onOpened])
 
   async function submit() {
     if (!email.trim()) return
