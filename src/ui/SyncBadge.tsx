@@ -105,7 +105,9 @@ function AccountSheet({ session, state, detail, pending, onClose }: {
             <span>{DOT[state].label}</span>
           </div>
           {detail && <div className="dim" style={{ marginTop: 6 }}>{detail}</div>}
-          {pending > 0 && (
+          {/* "waiting to upload" is only meaningful if there is somewhere to
+              upload to — an unconfigured build queues rows that go nowhere. */}
+          {pending > 0 && isConfigured && (
             <div className="dim" style={{ marginTop: 6 }}>
               {pending} change{pending === 1 ? '' : 's'} waiting to upload.
             </div>
