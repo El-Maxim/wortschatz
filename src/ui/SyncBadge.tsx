@@ -142,6 +142,10 @@ function AccountSheet({ session, state, detail, pending, onClose, onOpened }: {
           )}
         </div>
 
+        <div className="small dim" style={{ marginTop: 8, textAlign: 'right' }}>
+          Build {__BUILD_ID__}
+        </div>
+
         {!isConfigured ? (
           <p className="small dim" style={{ marginTop: 12 }}>
             This build has no Supabase credentials, so it runs purely locally. Everything
@@ -154,7 +158,7 @@ function AccountSheet({ session, state, detail, pending, onClose, onOpened }: {
               share this account.
             </p>
             <div className="wrap" style={{ marginTop: 10 }}>
-              <button className="btn primary" style={{ flex: 1 }} onClick={() => void syncNow()}>Sync now</button>
+              <button className="btn primary" style={{ flex: 1 }} onClick={() => void syncNow({ full: true })}>Sync now</button>
               <button className="btn ghost" onClick={async () => { await signOut(); onClose() }}>Sign out</button>
             </div>
 

@@ -109,7 +109,7 @@ function emit(state: SyncState, detail?: string) {
   for (const fn of listeners) fn(state, detail)
 }
 
-export async function syncNow(): Promise<SyncState> {
+export async function syncNow(options: { full?: boolean } = {}): Promise<SyncState> {
   if (!client) { emit('signed-out'); return 'signed-out' }
   if (!navigator.onLine) { emit('offline'); return 'offline' }
   const session = await currentSession()
@@ -120,7 +120,7 @@ export async function syncNow(): Promise<SyncState> {
   emit('syncing')
   try {
     await push()
-    await pull()
+    await pull(options.full === true)
     emit('idle')
     return 'idle'
   } catch (error) {
@@ -180,13 +180,34 @@ async function push(): Promise<void> {
  */
 const WATERMARK_VERSION = 2
 
-async function pull(): Promise<void> {
+const EPOCH = '1970-01-01T00:00:00.000Z'
+
+/** Rows per request. A short page means the table is exhausted. */
+const PAGE = 1000
+
+/**
+ * How often to re-read everything instead of trusting the watermark.
+ *
+ * The incremental pull is an optimisation, and this data set is tiny — a few
+ * hundred rows for one user. Re-reading all of it on every cold start, and once
+ * a day while the app stays open, costs one small request per table and makes
+ * drift self-healing: a row missed for any reason is collected on the next
+ * launch instead of being hidden forever. Failures in this layer are invisible
+ * by nature — sync still reports success — so the cheap, dumb, always-correct
+ * path is worth far more here than the saved bandwidth.
+ */
+const FULL_PULL_INTERVAL_MS = 24 * 60 * 60 * 1000
+
+async function pull(full = false): Promise<void> {
   if (await getMeta<number>('syncWatermarkVersion', 1) < WATERMARK_VERSION) {
-    await setMeta('lastSyncAt', '1970-01-01T00:00:00.000Z')
     await setMeta('syncWatermarkVersion', WATERMARK_VERSION)
+    full = true
   }
 
-  const since = await getMeta<string>('lastSyncAt', '1970-01-01T00:00:00.000Z')
+  const lastFull = Date.parse(await getMeta<string>('lastFullPullAt', ''))
+  if (Number.isNaN(lastFull) || Date.now() - lastFull > FULL_PULL_INTERVAL_MS) full = true
+
+  const since = full ? EPOCH : await getMeta<string>('lastSyncAt', EPOCH)
   /**
    * The high-water mark is the newest `updated_at` actually seen from the
    * server — never the local clock.
@@ -200,50 +221,60 @@ async function pull(): Promise<void> {
   let highest = since
 
   for (const mapping of TABLES) {
-    const { data, error } = await client!
-      .from(mapping.remote)
-      .select('*')
-      .gt('updated_at', since)
-      .order('updated_at', { ascending: true })
-      .limit(2000)
-    if (error) throw new Error(`pull ${mapping.remote}: ${error.message}`)
-    if (!data?.length) continue
-
-    for (const row of data as Record<string, unknown>[]) {
-      const stamp = String(row.updated_at ?? '')
-      if (stamp && Date.parse(stamp) > Date.parse(highest)) highest = stamp
-    }
-
     const store = (db as unknown as Record<SyncTable, {
       get(id: string): Promise<Record<string, unknown> | undefined>
       put(row: Record<string, unknown>): Promise<unknown>
     }>)[mapping.table]
 
-    for (const remoteRow of data as Record<string, unknown>[]) {
-      const local = toLocal(remoteRow, mapping)
-      // A copy uploaded by an older build; the local seed is authoritative.
-      if (isBundled(mapping.table, local)) continue
-      const existing = await store.get(String(local.id))
-      // LWW: a remote row only wins if it is strictly newer than what we hold.
-      if (existing && !newer(local.updatedAt, existing.updatedAt)) continue
-      try {
-        // A row pulled from the server must not be pushed straight back.
-        await store.put(local)
-      } catch (error) {
-        // Dexie enforces unique indexes on `slug` and `isoWeek`. An incoming row
-        // can legitimately carry a different id for the same logical record —
-        // an install that seeded its curated topics before ids were derived from
-        // the slug. Drop the stale local row and take the server's version;
-        // anything else leaves that device unable to sync at all.
-        if (!(error instanceof Error) || error.name !== 'ConstraintError') throw error
-        const healed = await healConflict(mapping.table, local)
-        if (!healed) throw error
+    // Paged, so a table larger than one response (review_log grows a row per
+    // review) is read to the end rather than silently truncated.
+    let cursor = since
+    for (;;) {
+      const { data, error } = await client!
+        .from(mapping.remote)
+        .select('*')
+        .gt('updated_at', cursor)
+        .order('updated_at', { ascending: true })
+        .limit(PAGE)
+      if (error) throw new Error(`pull ${mapping.remote}: ${error.message}`)
+      if (!data?.length) break
+
+      for (const remoteRow of data as Record<string, unknown>[]) {
+        const local = toLocal(remoteRow, mapping)
+        // A copy uploaded by an older build; the local seed is authoritative.
+        if (isBundled(mapping.table, local)) continue
+        const existing = await store.get(String(local.id))
+        // LWW: a remote row only wins if it is strictly newer than what we hold.
+        if (existing && !newer(local.updatedAt, existing.updatedAt)) continue
+        try {
+          // A row pulled from the server must not be pushed straight back.
+          await store.put(local)
+        } catch (error) {
+          // Dexie enforces unique indexes on `slug` and `isoWeek`. An incoming row
+          // can legitimately carry a different id for the same logical record —
+          // an install that seeded its curated topics before ids were derived from
+          // the slug. Drop the stale local row and take the server's version;
+          // anything else leaves that device unable to sync at all.
+          if (!(error instanceof Error) || error.name !== 'ConstraintError') throw error
+          const healed = await healConflict(mapping.table, local)
+          if (!healed) throw error
+        }
       }
+
+      const last = String((data[data.length - 1] as Record<string, unknown>).updated_at ?? '')
+      if (last && Date.parse(last) > Date.parse(highest)) highest = last
+      if (data.length < PAGE) break
+      // A whole page sharing one timestamp cannot be paged past on `updated_at`
+      // alone. It would take 1000 rows written in the same millisecond, so stop
+      // rather than spin; the next full pull picks up anything beyond it.
+      if (!last || last === cursor) break
+      cursor = last
     }
   }
 
   await setMeta('lastSyncAt', highest)
   await setMeta('syncWatermarkVersion', WATERMARK_VERSION)
+  if (full) await setMeta('lastFullPullAt', new Date().toISOString())
 }
 
 /** The unique (non-primary-key) index each table carries, if any. */
@@ -289,7 +320,9 @@ export function startSync(): () => void {
   addEventListener('offline', () => emit('offline'))
   document.addEventListener('visibilitychange', () => { if (!document.hidden) kick() })
   timer = setInterval(kick, 5 * 60 * 1000)
-  kick()
+  // A cold start re-reads everything, so a device that drifted out of step
+  // fixes itself by being opened.
+  void syncNow({ full: true })
 
   return () => {
     removeEventListener('focus', kick)

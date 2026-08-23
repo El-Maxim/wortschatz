@@ -110,6 +110,19 @@ Pushing to `main` builds and deploys to GitHub Pages automatically.
 `SUPABASE_SERVICE_ROLE_KEY` is used **only** by `/coach`. It has no `VITE_` prefix
 precisely so that Vite cannot bundle it into the client.
 
+## When a device looks out of step
+
+Open the sync panel (the dot in the header). It shows a **Build** timestamp.
+
+If two devices show different builds, the older one is running a stale bundle —
+the service worker updates on the next launch and the app reloads itself, so
+opening it again is enough. Deploys after 2026-08-23 do this automatically;
+reaching one from an older build needs a single manual refresh first.
+
+If both show the same build and data is still missing, that is a real bug, not
+drift: every cold start re-reads the whole account from the server, so nothing
+should survive a relaunch. `npm run e2e:drift` is the test that guarantees it.
+
 ## Layout
 
 ```

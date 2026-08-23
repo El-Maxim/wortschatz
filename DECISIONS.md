@@ -167,3 +167,35 @@ scheme skipped.
 
 `scripts/e2e-clockskew.mjs` reproduces it: device B's watermark is pushed ten
 minutes into the future, device A writes a word, and B must still receive it.
+
+## A cold start re-reads everything
+
+The incremental watermark is an optimisation, and every bug in it has looked the
+same from the outside: sync reports success and quietly serves stale data. That
+is the worst possible failure mode, because there is nothing for the user to
+notice and nothing for me to debug from.
+
+So the watermark is no longer trusted as the only path to correctness. A full
+re-read runs on every cold start, and once a day for an app left open. For one
+user with a few hundred rows that is one small request per table; in exchange,
+any drift — from any cause, including ones not yet found — is repaired by
+opening the app. Pulls are also paged now, so `review_log` cannot outgrow a
+single response and be silently truncated.
+
+## The app reloads itself when a new build lands
+
+`skipWaiting` + `clientsClaim` swap the *service worker* immediately, but a page
+already open keeps running the JavaScript it loaded. A tab left open since
+before a deploy, or an app resumed from the home screen, therefore keeps
+executing the old bundle indefinitely — and keeps reporting "Synced", because
+the old sync code still runs and still succeeds.
+
+That is how a shipped fix can fail to reach a device that never looks broken.
+`src/lib/updates.ts` reloads once when a new worker takes control, guarded so
+the first-ever load (where `clientsClaim` fires the same event) does not flash.
+
+## The build stamp is visible in the app
+
+The Sync panel shows the build timestamp. A device stuck on an old bundle is
+indistinguishable from a healthy one otherwise, which turned a five-minute
+diagnosis into several rounds of guessing.

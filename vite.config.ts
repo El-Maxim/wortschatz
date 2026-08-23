@@ -63,5 +63,11 @@ export default defineConfig({
       devOptions: { enabled: true, type: 'module' },
     }),
   ],
+  // Stamped into the bundle so the app can say which build it is running.
+  // A device silently stuck on an old bundle looks identical to a healthy one
+  // from the outside — this is how you tell the difference without guessing.
+  define: {
+    __BUILD_ID__: JSON.stringify(new Date().toISOString().replace('T', ' ').slice(0, 16) + ' UTC'),
+  },
   build: { target: 'es2022', sourcemap: false },
 })
